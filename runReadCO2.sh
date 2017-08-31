@@ -8,4 +8,4 @@
 module purge
 module load R_earth/3.1.0
 
-Rscript readSIFnc.R
+Rscript readSIFnc_CO2.R
