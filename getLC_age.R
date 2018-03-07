@@ -21,7 +21,10 @@ require(parallel)
 
 sifdt = fread("../../data/sif/csv_co2/ABoVE_SIF_all.csv")
 
-registerDoParallel(detectCores())
+registerDoParallel(14)
+
+block = commandArgs(TRUE)[1]
+block = as.numeric(block)
 
 getPoly = function(i, sifdt){
 
@@ -62,11 +65,23 @@ aboveCheck = function(smp,a) {
 getTile = function(i, sifdt){
 
   # reproject to ABoVE 
-  thePoly = getPoly(i, sifdt)
-  thePoly_aea = spTransform(thePoly, CRS(projection(agrid)))
+  #  thePoly = getPoly(i, sifdt)
+  meanLon = mean(unlist(sifdt[i, .(LL_lon, UL_lon, LR_lon, UR_lon)]))
+  meanLat = mean(unlist(sifdt[i, .(LL_lat, UL_lat, LR_lat, UR_lat)]))
+
+  if(is.na(meanLon) | is.na(meanLat))return(NA)
+
+  ll_matr = matrix(c(meanLon, meanLat),
+                  ncol=2, byrow=T) 
+
+  ll_df = as.data.frame(ll_matr)
+  coordinates(ll_df) = c("V1", "V2")
+  proj4string(ll_df) = CRS("+proj=longlat +datum=WGS84")
+
+  aea = spTransform(ll_df, CRS(projection(agrid)))
 
   # intersect
-  tilepick = unlist(lapply(1:nrow(agrid), aboveCheck, smp = thePoly_aea))
+  tilepick = unlist(lapply(1:nrow(agrid), aboveCheck, smp = aea))
   theTile = agrid[which(tilepick!=-999),]
 
   # convert nomenclature
@@ -86,22 +101,23 @@ getTile = function(i, sifdt){
 #tilelist = unlist(mclapply(1:nrow(sifdt),getTile, siftdt=sifdt, mc.cores=detectCores()))
 #tilelist = unlist(lapply(1:nrow(sifdt), getTile, sifdt=sifdt))
 
-tilelist = foreach(i = 1:nrow(sifdt),
-                   .combine = c) %dopar% {
+#tilelist = foreach(i = 1:nrow(sifdt),
+#tilelist <- foreach(i = 1:1000,
+#                   .combine = c) %dopar% {
 
-  if(i %% 1000 == 0)print(i)
+#  if(i %% 1000 == 0)print(i)
 
-  return(getTile(i, sifdt=sifdt))
+#  return(getTile(i, sifdt=sifdt))
   
 
-}
+#}
 
-print("Tilelist generated")
+#print("Tilelist generated")
 
-sifdt[, theTile := tilelist]
-sifdt = na.omit(sifdt)
+#sifdt[, theTile := tilelist]
+#sifdt = na.omit(sifdt)
 
-write.csv(sifdt, "../../data/sif/csv_co2/ABoVE_SIF_all_tiles.csv", row.names=F)
+#write.csv(sifdt, "../../data/sif/csv_co2/ABoVE_SIF_all_tiles.csv", row.names=F)
 
 C2C_tiles  = list.files("/projectnb/landsat/users/dsm/above/cfs_change/C2C_change_year",
                         full.names=T)
@@ -115,7 +131,12 @@ EOSD_tiles = list.files("/projectnb/landsat/users/dsm/above/cfs_change/EOSD",
 
 getLandData = function(i, sifdt){
 
-  ti = sifdt[i, theTile]
+  #ti = sifdt[i, theTile]
+  ti = getTile(i, sifdt)
+  if(is.na(ti))return(NULL)
+  # check if tile is in domain
+  if(!any(grepl(ti, EOSD_tiles)))return(NULL)
+  if(!any(grepl(ti, C2C_tiles)))return(NULL)
   EOSD = raster(EOSD_tiles[grepl(ti, EOSD_tiles)])
   C2C = raster(C2C_tiles[grepl(ti, C2C_tiles)])
 
@@ -131,6 +152,7 @@ getLandData = function(i, sifdt){
   meanAge = mean(sifdt[i, y] - distYears, na.rm=T)
 
   # land cover data
+  if(is.null(EOSDex))return(NULL)
   lcdt = data.table(lc = EOSDex)
 
   # drop water clouds and other junk
@@ -142,27 +164,34 @@ getLandData = function(i, sifdt){
   scount = sum(lcdt$count)
   lcdt[,freq:=count/scount]
 
-  lc1 = lcdt[1, lc]
-  lc2 = lcdt[2, lc]
-  lc3 = lcdt[3, lc]
-  lc4 = lcdt[4, lc]
-
-  freq1 = lcdt[1, freq]
-  freq2 = lcdt[2, freq]
-  freq3 = lcdt[3, freq]
-  freq4 = lcdt[4, freq]
+  lc1 = ifelse(nrow(lcdt)>0,lcdt[1, lc],NA)
+  lc2 = ifelse(nrow(lcdt)>1,lcdt[2, lc],NA)
+  lc3 = ifelse(nrow(lcdt)>2,lcdt[3, lc],NA)
+  lc4 = ifelse(nrow(lcdt)>3,lcdt[4, lc],NA)
+  
+  freq1 = ifelse(nrow(lcdt)>0,lcdt[1, freq],NA)
+  freq2 = ifelse(nrow(lcdt)>1,lcdt[2, freq],NA)
+  freq3 = ifelse(nrow(lcdt)>2,lcdt[3, freq],NA)
+  freq4 = ifelse(nrow(lcdt)>3,lcdt[4, freq],NA)
 
   # produce a data table row!
 
   theRow = sifdt[i,]
-  theRow[, c("propDist", "meanAge", "lc1", "freq1", "lc2", "freq2", "lc3", "freq3", "lc4", "freq4") :=
-           .(propDist, meanAge, lc1, freq1, lc2, freq2, lc3, freq3, lc4, freq4)]
+  theRow[, c("tile", "propDist", "meanAge", "lc1", "freq1", "lc2", "freq2", "lc3", "freq3", "lc4", "freq4") :=
+           .(ti, propDist, meanAge, lc1, freq1, lc2, freq2, lc3, freq3, lc4, freq4)]
 
 }
 
 print('reading land cover data')
 
-siflcdt = foreach(i = 1:nrow(sifdt),
+
+blockstart =(block - 1)*500000 + 1
+blockend = blockstart + 500000
+if(blockend > nrow(sifdt))blockend=nrow(sifdt)
+
+#siflcdt = foreach(i = 1:nrow(sifdt),
+siflcdt = foreach(i = blockstart:blockend,
+#system.time(siflcdt <- foreach(i = 1:2000,
                   .combine = function(x,y)rbindlist(list(x,y),use.names=T)) %dopar% {
 
   if(i %% 1000 == 0)print(i)
@@ -171,7 +200,7 @@ siflcdt = foreach(i = 1:nrow(sifdt),
 
 }
 
-write.csv(siflcdt, "../../data/sif/csv_co2/ABoVE_SIF_all_lc.csv", row.names=F)
+write.csv(siflcdt, paste0("../../data/sif/csv_co2/ABoVE_SIF_all_lc_block_",block,".csv"), row.names=F)
 
 
 

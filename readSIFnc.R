@@ -17,7 +17,7 @@ registerDoParallel(detectCores())
 
 sif_files = list.files("../../data/sif/dl",
                        full.names=T,
-                       pattern="nc4$")
+                       pattern="nc5$")
 
 convertVertex = function(i, latvs, lonvs){
 
@@ -43,66 +43,85 @@ ABoVE_ll = spTransform(ABoVE, CRS=CRS(projection("+proj=longlat +datum=WGS84")))
 limits = extent(ABoVE_ll)
 rm(ABoVE)
 rm(ABoVE_ll)
+gc()
+
+print(paste0("There are ", length(sif_files), " NC files to read!!"))
 
 ## Read data
 ## Get pixels
-nc_dt  = foreach(i = 1:length(sif_files),
-                 .combine = function(x,y)rbindlist(list(x,y),use.names=T)) %dopar% {
+foreach(i = 1:length(sif_files)) %dopar% { 
+  #               .combine = function(x,y)rbindlist(list(x,y),use.names=T)
   
-  siff = sif_files[i]
-
-  # open NC
-  nc = nc_open(siff) 
-  # get lats/lons
-  latvs = ncvar_get(nc, "footprint_vertex_latitude")
-  lonvs = ncvar_get(nc, "footprint_vertex_longitude")
-  lats = ncvar_get(nc, "latitude")
-  lons = ncvar_get(nc, "longitude")
-
-  # get indices based on both lats and lons
-  above_lats = lats > limits@ymin & lats < limits@ymax
-  above_lons = lons > limits@xmin & lons < limits@xmax
-
-  # get indices based on measurement mode (want 0 for nadir)
-  measure = ncvar_get(nc, "measurement_mode")
-  measure_nadir = measure == 0
-
-  # get indices based on Cloud/cloud_flag (want 0 for clear)
-  clouds = ncvar_get(nc, "Cloud/cloud_flag")
-  clouds_clear = clouds==0
-
-  inABoVE = above_lats & above_lons & clouds_clear & measure_nadir
- 
-  # shape info 
-  inLatvs = latvs[,inABoVE] 
-  inLonvs = lonvs[,inABoVE] 
-
-  # data
-  SIF757 = ncvar_get(nc, "SIF_757nm")[inABoVE]
-  SIF771 = ncvar_get(nc, "SIF_771nm")[inABoVE]
-
-  # process time data
-  nctime = ncvar_get(nc, "time")[inABoVE]
-  time_str = ymd_hms("1993-1-1 0:0:0") + seconds_to_period(nctime)
-
-  # met data
-  vpd = ncvar_get(nc, "Meteo/vapor_pressure_deficit")[inABoVE]
-  temp2m = ncvar_get(nc, "Meteo/2m_temperature")[inABoVE]
-  #lowCloud = ncvar_get(nc, "Meteo/low_cloud_cover")[inABoVE]
-  #midCloud = ncvar_get(nc, "Meteo/mid_cloud_cover")[inABoVE]
-  #highCloud = ncvar_get(nc, "Meteo/high_cloud_cover")[inABoVE]
+  fout=paste0("../../data/sif/csv/ABoVE_SIF_",i,".csv")
+  if(i%%100 == 0)print(i)
+  if(!file.exists(fout)){
   
-  # footprint data
-  ll_matr_l=lapply(1:ncol(inLatvs),convertVertex, latvs=inLatvs, lonvs=inLonvs)
-  ll_matr = do.call(rbind, ll_matr_l)
+    siff = sif_files[i]
+  
+    # open NC
+    nc = nc_open(siff) 
+    # get lats/lons
+    latvs = ncvar_get(nc, "footprint_vertex_latitude")
+    lonvs = ncvar_get(nc, "footprint_vertex_longitude")
+    lats = ncvar_get(nc, "latitude")
+    lons = ncvar_get(nc, "longitude")
+  
+    # get indices based on both lats and lons
+    above_lats = lats > limits@ymin & lats < limits@ymax
+    above_lons = lons > limits@xmin & lons < limits@xmax
+  
+    # get indices based on measurement mode (want 0 for nadir)
+    measure = ncvar_get(nc, "measurement_mode")
+    measure_nadir = measure == 0
+  
+    # get indices based on Cloud/cloud_flag (want 0 for clear)
+    clouds = ncvar_get(nc, "Cloud/cloud_flag")
+    clouds_clear = clouds==0
+  
+    inABoVE = above_lats & above_lons & clouds_clear & measure_nadir
+  
+    if(!any(inABoVE))return(NULL)
+  
+    # shape info 
+    inLatvs = latvs[,inABoVE] 
+    inLonvs = lonvs[,inABoVE] 
+  
+    # data
+    SIF757 = ncvar_get(nc, "SIF_757nm")[inABoVE]
+    SIF771 = ncvar_get(nc, "SIF_771nm")[inABoVE]
+  
+    # process time data
+    nctime = ncvar_get(nc, "time")[inABoVE]
+    time_str = ymd_hms("1993-1-1 0:0:0") + seconds_to_period(nctime)
+  
+    # met data
+    vpd = ncvar_get(nc, "Meteo/vapor_pressure_deficit")[inABoVE]
+    temp2m = ncvar_get(nc, "Meteo/2m_temperature")[inABoVE]
+    #lowCloud = ncvar_get(nc, "Meteo/low_cloud_cover")[inABoVE]
+    #midCloud = ncvar_get(nc, "Meteo/mid_cloud_cover")[inABoVE]
+    #highCloud = ncvar_get(nc, "Meteo/high_cloud_cover")[inABoVE]
+    
+    nc_close(nc)
 
-  # combine
-  nc_matr = cbind(as.character(time_str), ll_matr, SIF757, SIF771, vpd, temp2m)
-  nc_dt = as.data.table(nc_matr)
-  numercols = c("SIF771", "SIF757", "LL_lon", "LL_lat", "UL_lon", "UL_lat", "UR_lon", "UR_lat", "LR_lon", "LR_lat","temp2m", "vpd")
-  nc_dt[, lapply(.SD, as.numeric), .SDcols = numercols]
-  setnames(nc_dt, "V1", "nctime")
+    # footprint data
+    if(is.null(ncol(inLatvs)) & !is.null(length(inLatvs))){
+    
+      inLatvs = matrix(inLatvs, ncol=1, byrow=T)
+      inLonvs = matrix(inLonvs, ncol=1, byrow=T)
+    
+    }
+    ll_matr_l=lapply(1:ncol(inLatvs),convertVertex, latvs=inLatvs, lonvs=inLonvs)
+    ll_matr = do.call(rbind, ll_matr_l)
+  
+    # combine
+    nc_matr = cbind(as.character(time_str), ll_matr, SIF757, SIF771, vpd, temp2m)
+    nc_dt = as.data.table(nc_matr)
+    numercols = c("SIF771", "SIF757", "LL_lon", "LL_lat", "UL_lon", "UL_lat", "UR_lon", "UR_lat", "LR_lon", "LR_lat","temp2m", "vpd")
+    nc_dt[, lapply(.SD, as.numeric), .SDcols = numercols]
+    setnames(nc_dt, "V1", "nctime")
+  
+    write.csv(nc_dt, fout, row.names=F)
+  } 
 
 }
-
 

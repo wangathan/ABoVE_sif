@@ -64,7 +64,7 @@ ncatt_get(test, "latitude") #to learn about each variable
 # matrix of data
 fs = ncvar_get(test, "SIF_757nm")
 dim(fs) # 104006
-lat = ncvar_get(test, "latitude")
+lat = ncvar_get(test, "vertex_latitude")
 dim(lat) # 104006
 lon = ncvar_get(test, "longitude")
 dim(lon) # 104006

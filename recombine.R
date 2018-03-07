@@ -9,7 +9,7 @@ require(doParallel)
 
 registerDoParallel(detectCores())
 
-files = list.files("../../data/sif/csv",
+files = list.files("../../data/sif/csv_co2",
                    pattern="ABoVE_SIF_[0-9]*.csv",
                    full.names=T)
 
@@ -20,4 +20,4 @@ bigcsv = foreach(i = 1:length(files),
 
 }
 
-write.csv(bigcsv, "../../data/sif/csv/ABoVE_SIF_all.csv", row.names=F)
+write.csv(bigcsv, "../../data/sif/csv_co2/ABoVE_SIF_all.csv", row.names=F)
